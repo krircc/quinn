@@ -9,6 +9,7 @@ use futures::{ready, stream::Stream, Future, Poll};
 use http::{request, HeaderMap, Request, Response};
 use quinn::{Endpoint, OpenBi};
 use quinn_proto::{crypto::rustls::Certificate, Side, StreamId};
+use tracing::{trace, trace_span};
 use url::Url;
 
 use crate::{
@@ -133,6 +134,7 @@ impl Connection {
     }
 
     pub fn close(self) {
+        trace!("connection closed by user");
         self.0
             .quic
             .close(ErrorCode::NO_ERROR.into(), b"Connection closed");
@@ -331,6 +333,11 @@ impl Future for SendRequest {
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         loop {
+            let span = match self.stream_id {
+                None => trace_span!("request opening"),
+                Some(id) => trace_span!("request", ?id),
+            };
+            let _guard = span.enter();
             match self.state {
                 SendRequestState::Aborted => return Poll::Ready(Err(Error::Aborted)),
                 SendRequestState::Opening(ref mut o) => {

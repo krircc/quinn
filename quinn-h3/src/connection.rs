@@ -11,6 +11,7 @@ use bytes::{Bytes, BytesMut};
 use futures::{AsyncRead, Future, Poll, Stream};
 use quinn::{IncomingBiStreams, IncomingUniStreams, RecvStream, SendStream};
 use quinn_proto::{Side, StreamId};
+use tracing::{trace, trace_span, warn};
 
 use crate::{
     frame::FrameStream,
@@ -233,6 +234,7 @@ impl ConnectionInner {
         match new_stream {
             NewUni::Control(stream) => match self.recv_control {
                 None => {
+                    trace!("Got control stream");
                     self.recv_control = Some(stream);
                     Ok(())
                 }
@@ -246,6 +248,7 @@ impl ConnectionInner {
             },
             NewUni::Decoder(s) => match self.recv_decoder {
                 None => {
+                    trace!("Got decoder stream");
                     self.recv_decoder =
                         Some((s, BytesMut::with_capacity(RECV_DECODER_INITIAL_CAPACITY)));
                     Ok(())
@@ -260,6 +263,7 @@ impl ConnectionInner {
             },
             NewUni::Encoder(s) => match self.recv_encoder {
                 None => {
+                    trace!("Got encoder stream");
                     self.recv_encoder =
                         Some((s, BytesMut::with_capacity(RECV_ENCODER_INITIAL_CAPACITY)));
                     Ok(())
@@ -273,7 +277,7 @@ impl ConnectionInner {
                 }
             },
             NewUni::Push(_) => {
-                println!("push stream ignored");
+                warn!("push stream ignored");
                 Ok(())
             }
         }
@@ -284,6 +288,9 @@ impl ConnectionInner {
             None => return Ok(()),
             Some(c) => c,
         };
+
+        let span = trace_span!("control stream");
+        let _guard = span.enter();
 
         loop {
             match Pin::new(&mut control).poll_next(cx) {
@@ -300,16 +307,18 @@ impl ConnectionInner {
                 Poll::Ready(Some(Ok(frame))) => {
                     match (self.inner.remote_settings().is_some(), self.side, frame) {
                         (_, _, HttpFrame::Settings(s)) => {
+                            trace!("Got Settings: {:#?}", s);
                             self.inner.set_remote_settings(s)?;
                         }
                         (true, Side::Client, HttpFrame::Goaway(id)) => {
+                            trace!("Got Goaway({:?})", id);
                             self.inner.leave(StreamId(id));
                         }
                         (true, Side::Server, HttpFrame::CancelPush(_)) => {
-                            println!("CANCEL_PUSH frame ignored");
+                            warn!("CANCEL_PUSH frame ignored");
                         }
                         (true, Side::Server, HttpFrame::MaxPushId(_)) => {
-                            println!("MAX_PUSH_ID frame ignored");
+                            warn!("MAX_PUSH_ID frame ignored");
                         }
                         (false, Side::Server, HttpFrame::CancelPush(_))
                         | (false, Side::Server, HttpFrame::MaxPushId(_))
@@ -339,6 +348,9 @@ impl ConnectionInner {
             Some((ref mut s, ref mut b)) => (s, b),
         };
 
+        let span = trace_span!("encoder stream");
+        let _guard = span.enter();
+
         loop {
             let mut read_buf = [0; RECV_ENCODER_INITIAL_CAPACITY];
             match Pin::new(&mut recv_encoder).poll_read(cx, &mut read_buf[..])? {
@@ -355,8 +367,9 @@ impl ConnectionInner {
                         (cur.position() as usize, max_recieved_ref + 1)
                     };
 
-                    buffer.advance(pos);
-                    buffer.reserve(buffer.capacity());
+                    buffer.split_to(pos);
+                    buffer.reserve(RECV_ENCODER_INITIAL_CAPACITY);
+                    trace!("decoded {} bytes, buf capacity: {}", pos, buffer.capacity());
 
                     let blocked = self.blocked_streams.split_off(&max_recieved_ref);
                     let unblocked = mem::replace(&mut self.blocked_streams, blocked);
@@ -375,6 +388,9 @@ impl ConnectionInner {
             Some((ref mut s, ref mut b)) => (s, b),
         };
 
+        let span = trace_span!("decoder stream");
+        let _guard = span.enter();
+
         loop {
             let mut read_buf = [0; RECV_DECODER_INITIAL_CAPACITY];
             match Pin::new(&mut recv_decoder).poll_read(cx, &mut read_buf[..])? {
@@ -390,8 +406,9 @@ impl ConnectionInner {
                         self.inner.on_recv_decoder(&mut cur)?;
                         cur.position() as usize
                     };
-                    buffer.advance(pos);
-                    buffer.reserve(buffer.capacity());
+                    buffer.split_to(pos);
+                    buffer.reserve(RECV_DECODER_INITIAL_CAPACITY);
+                    trace!("decoded {} bytes, buf capacity: {}", pos, buffer.capacity());
                 }
             }
         }
