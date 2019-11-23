@@ -16,6 +16,8 @@ pub struct VarInt(pub(crate) u64);
 impl VarInt {
     /// The largest representable value
     pub const MAX: VarInt = VarInt((1 << 62) - 1);
+    /// The largest encoded value length
+    pub const MAX_SIZE: usize = 8;
 
     /// Construct a `VarInt` infallibly
     pub const fn from_u32(x: u32) -> Self {
@@ -58,6 +60,18 @@ impl VarInt {
             8
         } else {
             unreachable!("malformed VarInt");
+        }
+    }
+
+    /// Length of an encoded value from its first byte
+    pub fn size_encoded(first: u8) -> usize {
+        let tag = first >> 6;
+        match tag {
+            0b00 => 1,
+            0b01 => 2,
+            0b10 => 4,
+            0b11 => 8,
+            _ => unreachable!(),
         }
     }
 }
