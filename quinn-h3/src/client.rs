@@ -1,9 +1,15 @@
-use std::{mem, net::SocketAddr, pin::Pin, task::Context};
+use std::{
+    mem,
+    net::{SocketAddr, ToSocketAddrs},
+    pin::Pin,
+    task::Context,
+};
 
 use futures::{ready, stream::Stream, Future, Poll};
 use http::{request, HeaderMap, Request, Response};
 use quinn::{Endpoint, OpenBi};
-use quinn_proto::{Side, StreamId};
+use quinn_proto::{crypto::rustls::Certificate, Side, StreamId};
+use url::Url;
 
 use crate::{
     body::{Body, BodyWriter, RecvBody},
@@ -86,14 +92,31 @@ pub struct Client {
 }
 
 impl Client {
-    pub fn connect(
+    pub fn connect(&self, url: &Url) -> Result<Connecting, ConnectError> {
+        let host = url.host_str().ok_or(ConnectError::HostNotFound)?;
+        let socket_addr = (host, url.port().unwrap_or(4433))
+            .to_socket_addrs()
+            .map_err(|e| ConnectError::Io(e))?
+            .next()
+            .ok_or(ConnectError::NoSocket)?;
+
+        Ok(Connecting {
+            settings: self.settings.clone(),
+            connecting: self
+                .endpoint
+                .connect(&socket_addr, host)
+                .map_err(|e| ConnectError::Quic(e))?,
+        })
+    }
+
+    pub fn connect_socket(
         &self,
-        addr: &SocketAddr,
-        server_name: &str,
+        socket_addr: &SocketAddr,
+        host: &str,
     ) -> Result<Connecting, quinn::ConnectError> {
         Ok(Connecting {
             settings: self.settings.clone(),
-            connecting: self.endpoint.connect(addr, server_name)?,
+            connecting: self.endpoint.connect(socket_addr, host)?,
         })
     }
 }
@@ -507,4 +530,16 @@ fn build_response(
         .unwrap();
     *response.headers_mut() = headers;
     Ok(response)
+}
+
+#[derive(Debug, Error)]
+pub enum ConnectError {
+    #[error(display = "Could not parse the 'host' part")]
+    HostNotFound,
+    #[error(display = "No socket could be opened given this url")]
+    NoSocket,
+    #[error(display = "Io error: {:?}", _0)]
+    Io(std::io::Error),
+    #[error(display = "Quic error: {:?}", _0)]
+    Quic(quinn::ConnectError),
 }
