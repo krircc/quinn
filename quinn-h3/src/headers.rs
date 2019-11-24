@@ -7,7 +7,7 @@ use quinn_proto::StreamId;
 use crate::{
     connection::ConnectionRef,
     frame::WriteFrame,
-    proto::{connection::DecodeResult, frame::HeadersFrame, headers::Header, ErrorCode},
+    proto::{connection::DecodeResult, frame::HeadersFrame, headers::Header},
     Error,
 };
 
@@ -61,10 +61,6 @@ impl SendHeaders {
         conn.wake();
 
         Ok(Self(WriteFrame::new(send, frame)))
-    }
-
-    pub fn reset(self, err_code: ErrorCode) {
-        self.0.reset(err_code);
     }
 }
 

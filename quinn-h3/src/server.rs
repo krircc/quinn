@@ -1,7 +1,7 @@
 use std::{mem, net::SocketAddr, pin::Pin, task::Context};
 
 use futures::{ready, Future, Poll, Stream};
-use http::{response, HeaderMap, Request, Response};
+use http::{response, Request, Response};
 use quinn::{EndpointBuilder, EndpointDriver, EndpointError, RecvStream, SendStream};
 use quinn_proto::{Side, StreamId};
 
@@ -252,7 +252,7 @@ impl Sender {
             Body::None => send,
             Body::Buf(payload) => WriteFrame::new(send, DataFrame { payload }).await?,
         };
-        Ok(BodyWriter::new(send, self.conn, self.stream_id, None, true))
+        Ok(BodyWriter::new(send, self.conn, self.stream_id, true))
     }
 
     pub fn cancel(mut self) {

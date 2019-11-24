@@ -155,12 +155,12 @@ impl Connection {
                 let send = WriteFrame::new(send, DataFrame { payload }).await?;
                 Ok((
                     recv,
-                    BodyWriter::new(send, self.0.clone(), stream_id, None, false), // remove None
+                    BodyWriter::new(send, self.0.clone(), stream_id, false),
                 ))
             }
             Body::None => Ok((
                 recv,
-                BodyWriter::new(send, self.0.clone(), stream_id, None, false), // remove None
+                BodyWriter::new(send, self.0.clone(), stream_id, false),
             )),
         }
     }

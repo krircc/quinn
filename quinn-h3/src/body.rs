@@ -1,5 +1,5 @@
 use std::{
-    cmp, fmt,
+    cmp,
     io::{self, ErrorKind},
     mem,
     pin::Pin,
@@ -52,52 +52,6 @@ impl From<Bytes> for Body {
 impl From<&str> for Body {
     fn from(buf: &str) -> Self {
         Body::Buf(buf.into())
-    }
-}
-
-pub struct RecvBody {
-    recv: FrameStream,
-    conn: ConnectionRef,
-    stream_id: StreamId,
-    finish_request: bool,
-}
-
-#[must_use = "body must be read or canceled"] // else, request might never be finished
-impl RecvBody {
-    pub(crate) fn new(
-        recv: FrameStream,
-        conn: ConnectionRef,
-        stream_id: StreamId,
-        finish_request: bool,
-    ) -> Self {
-        RecvBody {
-            conn,
-            stream_id,
-            recv,
-            finish_request,
-        }
-    }
-
-    pub fn cancel(self) {
-        self.recv.reset(ErrorCode::REQUEST_CANCELLED);
-        if self.finish_request {
-            self.conn
-                .h3
-                .lock()
-                .unwrap()
-                .inner
-                .request_finished(self.stream_id);
-        }
-    }
-
-    pub fn into_reader(self) -> BodyReader {
-        BodyReader::new(self.recv, self.conn, self.stream_id, self.finish_request)
-    }
-}
-
-impl fmt::Debug for RecvBody {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "RecvBody {{ stream_id: {:?} }}", self.stream_id)
     }
 }
 
@@ -241,7 +195,6 @@ pub struct BodyWriter {
     state: BodyWriterState,
     conn: ConnectionRef,
     stream_id: StreamId,
-    trailers: Option<HeaderMap>,
     finish_request: bool,
 }
 
@@ -250,13 +203,11 @@ impl BodyWriter {
         send: SendStream,
         conn: ConnectionRef,
         stream_id: StreamId,
-        trailers: Option<HeaderMap>,
         finish_request: bool,
     ) -> Self {
         Self {
             conn,
             stream_id,
-            trailers,
             state: BodyWriterState::Idle(send),
             finish_request,
         }
@@ -265,21 +216,19 @@ impl BodyWriter {
     pub async fn trailers(mut self, trailers: HeaderMap) -> Result<(), Error> {
         match mem::replace(&mut self.state, BodyWriterState::Finished) {
             BodyWriterState::Idle(send) => {
-                Self::_trailers(trailers, &self.conn, send, self.stream_id).await
+                let mut stream =
+                    SendHeaders::new(Header::trailer(trailers), &self.conn, send, self.stream_id)?
+                        .await?;
+                stream.finish().await.map_err(Into::into)
             }
             _ => panic!("cannot send trailers while not in idle state"),
         }
     }
 
     pub async fn close(mut self) -> Result<(), Error> {
-        let trailers = self.trailers.take();
         let state = mem::replace(&mut self.state, BodyWriterState::Finished);
-
-        match (trailers, state) {
-            (Some(t), BodyWriterState::Idle(send)) => {
-                Self::_trailers(t, &self.conn, send, self.stream_id).await
-            }
-            (None, BodyWriterState::Idle(mut send)) => send.finish().await.map_err(Into::into),
+        match state {
+            BodyWriterState::Idle(mut send) => send.finish().await.map_err(Into::into),
             _ => panic!("cannot close while not in idle state"),
         }
     }
@@ -295,17 +244,6 @@ impl BodyWriter {
             }
             _ => (),
         }
-    }
-
-    async fn _trailers(
-        trailers: HeaderMap,
-        conn: &ConnectionRef,
-        send: SendStream,
-        stream_id: StreamId,
-    ) -> Result<(), Error> {
-        let mut stream =
-            SendHeaders::new(Header::trailer(trailers), conn, send, stream_id)?.await?;
-        stream.finish().await.map_err(Into::into)
     }
 }
 
