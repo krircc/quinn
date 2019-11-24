@@ -365,12 +365,15 @@ impl BodyReader {
         self.buf = Some(buf)
     }
 
-    pub fn trailers(&mut self) -> Option<DecodeHeaders> {
+    pub async fn trailers(&mut self) -> Option<Result<Header, Error>> {
         let trailers = self.trailers.take();
         let Self {
             conn, stream_id, ..
         } = &self;
-        trailers.map(|t| DecodeHeaders::new(t, conn.clone(), *stream_id))
+        match trailers {
+            None => None,
+            Some(t) => Some(DecodeHeaders::new(t, conn.clone(), *stream_id).await),
+        }
     }
 
     pub fn cancel(mut self) {
