@@ -1,13 +1,14 @@
 use quinn_proto::StreamId;
 use std::{
     collections::VecDeque,
+    future::Future,
     pin::Pin,
     sync::{Arc, Mutex},
-    task::{Context, Waker},
+    task::{Context, Poll, Waker},
 };
 
 use bytes::Bytes;
-use futures::{Future, Poll, Stream};
+use futures::Stream;
 use quinn::{IncomingBiStreams, IncomingUniStreams, RecvStream, SendStream};
 use quinn_proto::Side;
 

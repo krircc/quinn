@@ -66,7 +66,7 @@ impl Connection {
         )?;
 
         Ok(HeadersFrame {
-            encoded: block.into(),
+            encoded: block.freeze(),
         })
     }
 
@@ -100,7 +100,7 @@ impl Connection {
         if self.pending_control.is_empty() {
             return None;
         }
-        Some(self.pending_control.take().freeze())
+        Some(self.pending_control.split().freeze())
     }
 
     pub fn request_initiated(&mut self, id: StreamId) {
