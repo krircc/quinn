@@ -5,7 +5,7 @@ use anyhow::{anyhow, Context, Result};
 use futures::StreamExt;
 use tracing::trace;
 
-#[tokio::main(threaded_scheduler)]
+#[tokio::main(basic_scheduler)]
 async fn main() {
     tracing::subscriber::set_global_default(
         tracing_subscriber::FmtSubscriber::builder()
@@ -29,24 +29,27 @@ async fn main() {
         .unwrap();
     let server_addr = endpoint.local_addr().unwrap();
     drop(endpoint); // Ensure server shuts down when finished
-    let thread = tokio::spawn(async {
-        let driver = tokio::spawn(async {
-            driver.await.expect("server endpoint driver");
-        });
-        if let Err(e) = server(incoming).await {
-            eprintln!("server failed: {:#}", e);
-        }
-        driver.await.expect("server run");
-    });
+    let thread = std::thread::spawn(|| spawn_server(driver, incoming));
 
     if let Err(e) = client(server_addr, cert).await {
         eprintln!("client failed: {:#}", e);
     }
 
-    thread.await.expect("server thread");
+    thread.join().expect("server thread");
 }
 
-async fn server(mut incoming: quinn::Incoming) -> Result<()> {
+#[tokio::main(basic_scheduler)]
+async fn spawn_server(driver: quinn::EndpointDriver, incoming: quinn::Incoming) {
+    let driver = tokio::spawn(async {
+        driver.await.expect("server endpoint driver");
+    });
+    if let Err(e) = run_server(incoming).await {
+        eprintln!("server failed: {:#}", e);
+    }
+    driver.await.expect("server run");
+}
+
+async fn run_server(mut incoming: quinn::Incoming) -> Result<()> {
     let handshake = incoming.next().await.unwrap();
     let quinn::NewConnection {
         driver,

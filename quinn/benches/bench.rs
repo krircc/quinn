@@ -164,7 +164,7 @@ impl Context {
                         while let Some(_) = stream.read_unordered().await.unwrap() {}
                     }
                 }
-                .instrument(error_span!("server")),
+                    .instrument(error_span!("server")),
             );
         });
         (addr, handle)

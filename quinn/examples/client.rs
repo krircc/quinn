@@ -149,7 +149,7 @@ async fn run(options: Opt) -> Result<()> {
         conn.close(0u32.into(), b"done");
         Ok(())
     }
-    .await;
+        .await;
     r?;
 
     // Allow the endpoint driver to automatically shut down
