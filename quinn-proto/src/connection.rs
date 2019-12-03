@@ -287,9 +287,8 @@ where
     /// - an incoming packet is handled, or
     /// - the idle timer expires
     pub fn poll(&mut self) -> Option<Event> {
-        if let Some(dir) = Dir::iter()
-            .filter(|&i| mem::replace(&mut self.stream_opened[i as usize], false))
-            .next()
+        if let Some(dir) =
+            Dir::iter().find(|&i| mem::replace(&mut self.stream_opened[i as usize], false))
         {
             return Some(Event::StreamOpened { dir });
         }
@@ -1384,7 +1383,7 @@ where
                         }
 
                         self.state = State::Handshake(state::Handshake {
-                            token: Some(packet.payload.into()),
+                            token: Some(packet.payload.freeze()),
                             rem_cid_set: false,
                             client_hello: None,
                         });
@@ -1511,7 +1510,12 @@ where
                         ty: LongType::ZeroRtt,
                         ..
                     } => {
-                        self.process_payload(now, remote, number.unwrap(), packet.payload.into())?;
+                        self.process_payload(
+                            now,
+                            remote,
+                            number.unwrap(),
+                            packet.payload.freeze(),
+                        )?;
                         Ok(())
                     }
                     Header::VersionNegotiate { .. } => {
@@ -1526,22 +1530,19 @@ where
             State::Established => {
                 match packet.header.space() {
                     SpaceId::Data => {
-                        self.process_payload(now, remote, number.unwrap(), packet.payload.into())?
+                        self.process_payload(now, remote, number.unwrap(), packet.payload.freeze())?
                     }
                     _ => self.process_early_payload(now, packet)?,
                 }
                 Ok(())
             }
             State::Closed(_) => {
-                for frame in frame::Iter::new(packet.payload.into()) {
-                    match frame {
-                        Frame::Close(_) => {
-                            trace!("draining");
-                            self.state = State::Draining;
-                            return Ok(());
-                        }
-                        _ => {}
-                    };
+                for frame in frame::Iter::new(packet.payload.freeze()) {
+                    if let Frame::Close(_) = frame {
+                        trace!("draining");
+                        self.state = State::Draining;
+                        break;
+                    }
                 }
                 Ok(())
             }
@@ -1556,7 +1557,7 @@ where
         packet: Packet,
     ) -> Result<(), TransportError> {
         debug_assert_ne!(packet.header.space(), SpaceId::Data);
-        for frame in frame::Iter::new(packet.payload.into()) {
+        for frame in frame::Iter::new(packet.payload.freeze()) {
             let span = match frame {
                 Frame::Padding => None,
                 _ => Some(trace_span!("frame", ty = %frame.ty())),
@@ -2890,7 +2891,7 @@ where
             self.config.send_window - self.unacked_data,
         );
         let n = conn_budget.min(stream_budget).min(data.len() as u64) as usize;
-        self.queue_stream_data(stream, (&data[0..n]).into())?;
+        self.queue_stream_data(stream, Bytes::copy_from_slice(&data[0..n]))?;
         trace!(%stream, "wrote {} bytes", n);
         Ok(n)
     }
@@ -2940,7 +2941,7 @@ where
             - 1                 // flags byte
             - self.rem_cid.len()
             - 4                 // worst-case packet number size
-            - self.space(SpaceId::Data).crypto.as_ref().or(self.zero_rtt_crypto.as_ref()).unwrap().packet.tag_len()
+            - self.space(SpaceId::Data).crypto.as_ref().or_else(|| self.zero_rtt_crypto.as_ref()).unwrap().packet.tag_len()
             - Datagram::SIZE_BOUND;
         self.config.datagram_receive_buffer_size?;
         let limit = self.params.max_datagram_frame_size?.into_inner();

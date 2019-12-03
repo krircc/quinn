@@ -1,14 +1,15 @@
 use std::{
     collections::{BTreeMap, HashMap, VecDeque},
+    future::Future,
     io::{self, Cursor},
     mem,
     pin::Pin,
     sync::{Arc, Mutex},
-    task::{Context, Waker},
+    task::{Context, Poll, Waker},
 };
 
 use bytes::BytesMut;
-use futures::{AsyncRead, Future, Poll, Stream};
+use futures::{io::AsyncRead, Stream};
 use quinn::{IncomingBiStreams, IncomingUniStreams, RecvStream, SendStream};
 use quinn_proto::{Side, StreamId};
 
@@ -221,11 +222,8 @@ impl ConnectionInner {
             })
             .collect();
 
-        let mut removed = 0;
-
-        for (i, res) in resolved {
+        for (removed, (i, res)) in resolved.into_iter().enumerate() {
             self.pending_uni.remove(i - removed);
-            removed += 1;
             match res {
                 Err(Error::UnknownStream(ty)) => {
                     return Err(DriverError::peer(

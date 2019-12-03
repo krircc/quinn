@@ -1,6 +1,12 @@
-use std::{mem, net::SocketAddr, pin::Pin, task::Context};
+use std::{
+    future::Future,
+    mem,
+    net::SocketAddr,
+    pin::Pin,
+    task::{Context, Poll},
+};
 
-use futures::{ready, stream::Stream, Future, Poll};
+use futures::{ready, Stream};
 use http::{request, HeaderMap, Request, Response};
 use quinn::{Endpoint, OpenBi};
 use quinn_proto::{Side, StreamId};
@@ -445,7 +451,7 @@ impl Future for RecvResponse {
                         self.stream_id,
                     );
                     match response {
-                        Err(e) => return Poll::Ready(Err(e).into()),
+                        Err(e) => return Poll::Ready(Err(e)),
                         Ok(r) => {
                             self.state = RecvResponseState::Finished;
                             return Poll::Ready(Ok(r));

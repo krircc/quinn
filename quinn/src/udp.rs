@@ -1,9 +1,13 @@
-use std::{io, net::SocketAddr};
+use std::{
+    io,
+    net::SocketAddr,
+    task::{Context, Poll},
+};
 
-use futures::{ready, task::Context, Poll};
+use futures::ready;
 use mio;
 
-use tokio_net::{driver::Handle, util::PollEvented};
+use tokio::io::PollEvented;
 
 use proto::{EcnCodepoint, Transmit};
 
@@ -19,10 +23,10 @@ pub struct UdpSocket {
 }
 
 impl UdpSocket {
-    pub fn from_std(socket: std::net::UdpSocket, handle: &Handle) -> io::Result<UdpSocket> {
+    pub fn from_std(socket: std::net::UdpSocket) -> io::Result<UdpSocket> {
         let io = mio::net::UdpSocket::from_socket(socket)?;
         io.init_ext()?;
-        let io = PollEvented::new_with_handle(io, handle)?;
+        let io = PollEvented::new(io)?;
         Ok(UdpSocket { io })
     }
 
@@ -49,7 +53,7 @@ impl UdpSocket {
     ) -> Poll<Result<(usize, SocketAddr, Option<EcnCodepoint>), io::Error>> {
         ready!(self.io.poll_read_ready(cx, mio::Ready::readable()))?;
         match self.io.get_ref().recv_ext(buf) {
-            Ok(n) => Poll::Ready(Ok(n.into())),
+            Ok(n) => Poll::Ready(Ok(n)),
             Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
                 self.io.clear_read_ready(cx, mio::Ready::readable())?;
                 Poll::Pending
